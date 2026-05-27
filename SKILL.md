@@ -475,6 +475,10 @@ Two tools require user interaction. Check `getMessages` response for pending cal
 
 ### requestInteraction - User Choice/Input
 
+Two modes: **single-question** (one question with options) and **multi-question** (2+ related questions with tab navigation). Detect which mode by checking whether `input.questions` array is present.
+
+#### Mode 1: Single Question
+
 **Detect**:
 ```json
 {
@@ -484,31 +488,99 @@ Two tools require user interaction. Check `getMessages` response for pending cal
   "input": {
     "question": "Which age group to focus on?",
     "options": ["18-22", "23-28", "29-35"],
-    "maxSelect": 1  // 1=single, 2+=multi with limit, undefined=unlimited
+    "maxSelect": 1
   }
 }
 ```
+
+`maxSelect` controls selection behavior: `1` = single choice (mutually exclusive), `2+` = multi-choice with limit, `undefined`/omitted = unlimited multi-choice.
 
 **Submit** via `sendMessage`:
 ```json
 {
   "userChatToken": "...",
   "message": {
-    "id": "msg_2",  // Original message ID
+    "id": "msg_2",
     "role": "assistant",
     "lastPart": {
       "type": "tool-requestInteraction",
       "toolCallId": "call_abc",
       "state": "output-available",
-      "input": { /* copy from above */ },
+      "input": { "question": "...", "options": [...], "maxSelect": 1 },
       "output": {
-        "answer": "23-28",  // string for single, string[] for multi
+        "answer": ["23-28"],
         "plainText": "User selected: 23-28"
       }
     }
   }
 }
 ```
+
+`answer` is always `string[]` (array), even for single-choice (`maxSelect: 1`). If the user skips all options, send `answer: [], plainText: "None of the above"`.
+
+#### Mode 2: Multi-Question
+
+Used when the AI collects multiple related dimensions at once (e.g., demographic traits: gender, age, region). Detected by the presence of `input.questions` array — the top-level `question`/`options`/`maxSelect` fields are absent.
+
+**Detect**:
+```json
+{
+  "type": "tool-requestInteraction",
+  "state": "input-available",
+  "toolCallId": "call_abc",
+  "input": {
+    "questions": [
+      {
+        "label": "Gender",
+        "question": "What is your gender?",
+        "options": ["Male", "Female", "Non-binary", "Prefer not to say"],
+        "maxSelect": 1
+      },
+      {
+        "label": "Age",
+        "question": "Which age group do you belong to?",
+        "options": ["18-24", "25-34", "35-44", "45+"],
+        "maxSelect": 1
+      },
+      {
+        "label": "Location",
+        "question": "Which region are you in?",
+        "options": ["Tier-1 cities", "Tier-2/3 cities", "Rural areas"],
+        "maxSelect": 1
+      }
+    ]
+  }
+}
+```
+
+Each item in `questions` has a `label` (short tab name, 1-2 words), `question`, `options`, and optional `maxSelect`.
+
+**Submit** via `sendMessage`:
+```json
+{
+  "userChatToken": "...",
+  "message": {
+    "id": "msg_2",
+    "role": "assistant",
+    "lastPart": {
+      "type": "tool-requestInteraction",
+      "toolCallId": "call_abc",
+      "state": "output-available",
+      "input": { "questions": [...] },
+      "output": {
+        "answers": [
+          { "label": "Gender", "answer": ["Female"] },
+          { "label": "Age", "answer": ["25-34"] },
+          { "label": "Location", "answer": ["Tier-1 cities"] }
+        ],
+        "plainText": "Gender: Female\nAge: 25-34\nLocation: Tier-1 cities"
+      }
+    }
+  }
+}
+```
+
+Use `answers` (array of `{label, answer: string[]}`) instead of `answer`. The `plainText` should summarize each label/answer pair on a new line.
 
 ### makeStudyPlan - Plan Confirmation
 

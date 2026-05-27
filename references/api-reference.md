@@ -76,6 +76,16 @@ Send or continue a study turn. The message is persisted first, then the study ag
 
 **IMPORTANT**: Two distinct input types based on use case.
 
+**Interaction tool result formats** (for submitting pending `requestInteraction` or `makeStudyPlan` calls):
+
+| Pending tool | Mode | `output` shape |
+|---|---|---|
+| `tool-requestInteraction` | single-question (`input.question` present) | `{ answer: string[], plainText: string }` |
+| `tool-requestInteraction` | multi-question (`input.questions` present) | `{ answers: Array<{label: string, answer: string[]}>, plainText: string }` |
+| `tool-makeStudyPlan` | — | `{ confirmed: boolean, plainText: string }` |
+
+See [Complete Workflow Examples](#complete-workflow-examples) for full code.
+
 #### Type 1: User Text Message
 
 **Input Schema**:
@@ -509,35 +519,74 @@ while (true) {
 
 ### Example 2: Handling requestInteraction
 
+Two modes — check for `input.questions` to distinguish them.
+
 ```typescript
 async function handleRequestInteraction(userChatToken, messageId, toolPart) {
-  // Display to user
-  console.log(toolPart.input.question);
-  toolPart.input.options.forEach((opt, i) => console.log(`${i+1}. ${opt}`));
+  const input = toolPart.input;
 
-  // Get user selection (single or multi based on maxSelect)
-  const userAnswer = toolPart.input.maxSelect === 1
-    ? await getUserSingleChoice(toolPart.input.options)
-    : await getUserMultiChoice(toolPart.input.options, toolPart.input.maxSelect);
+  if (input.questions) {
+    // ── Multi-question mode ──
+    // Render each question as a separate tab; collect one answer array per question
+    const answers = [];
+    for (const q of input.questions) {
+      console.log(`[${q.label}] ${q.question}`);
+      q.options.forEach((opt, i) => console.log(`  ${i + 1}. ${opt}`));
 
-  // Submit tool result
-  await mcp.callTool("atypica_study_send_message", {
-    userChatToken,
-    message: {
-      id: messageId,
-      role: "assistant",
-      lastPart: {
-        type: "tool-requestInteraction",
-        toolCallId: toolPart.toolCallId,
-        state: "output-available",
-        input: toolPart.input,
-        output: {
-          answer: userAnswer,
-          plainText: `User selected: ${userAnswer}`
+      const selected = q.maxSelect === 1
+        ? [await getUserSingleChoice(q.options)]
+        : await getUserMultiChoice(q.options, q.maxSelect);
+
+      answers.push({ label: q.label, answer: selected });
+    }
+
+    const plainText = answers
+      .map(a => `${a.label}: ${a.answer.join(", ")}`)
+      .join("\n");
+
+    await mcp.callTool("atypica_study_send_message", {
+      userChatToken,
+      message: {
+        id: messageId,
+        role: "assistant",
+        lastPart: {
+          type: "tool-requestInteraction",
+          toolCallId: toolPart.toolCallId,
+          state: "output-available",
+          input: toolPart.input,
+          output: { answers, plainText }
         }
       }
-    }
-  });
+    });
+
+  } else {
+    // ── Single-question mode ──
+    console.log(input.question);
+    input.options.forEach((opt, i) => console.log(`${i + 1}. ${opt}`));
+
+    const selected = input.maxSelect === 1
+      ? [await getUserSingleChoice(input.options)]
+      : await getUserMultiChoice(input.options, input.maxSelect);
+
+    // If user skips: send answer: [], plainText: "None of the above"
+    await mcp.callTool("atypica_study_send_message", {
+      userChatToken,
+      message: {
+        id: messageId,
+        role: "assistant",
+        lastPart: {
+          type: "tool-requestInteraction",
+          toolCallId: toolPart.toolCallId,
+          state: "output-available",
+          input: toolPart.input,
+          output: {
+            answer: selected,          // string[] always, even for single-choice
+            plainText: `User selected: ${selected.join(", ")}`
+          }
+        }
+      }
+    });
+  }
 }
 ```
 
@@ -580,7 +629,6 @@ async function handleMakeStudyPlan(userChatToken, messageId, toolPart) {
 // Find personas matching semantic query
 const personas = await mcp.callTool("atypica_persona_search", {
   query: "young coffee enthusiasts",  // Semantic similarity
-  tier: 2,                            // High quality only
   limit: 10
 });
 
