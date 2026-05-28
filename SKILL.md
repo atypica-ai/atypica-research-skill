@@ -154,7 +154,19 @@ if (reportTool?.output?.reportToken) {
 ### Session Management
 
 **atypica_study_create** - Create research session
-- Input: `{ content: string }`
+- Input:
+  ```typescript
+  {
+    content: string;          // Initial user message to start the study
+    panelId?: number;         // Optional panel ID to use as persona source (from atypica_panel_search)
+    attachments?: Array<{     // Optional file attachments (upload first via atypica_get_upload_credentials)
+      objectUrl: string;      // S3 object URL from upload credentials
+      name: string;           // File name
+      mimeType: string;       // MIME type
+      size: number;           // File size in bytes
+    }>;
+  }
+  ```
 - Returns:
   ```typescript
   {
@@ -166,8 +178,9 @@ if (reportTool?.output?.reportToken) {
 
 **atypica_study_send_message** - Send message and start/continue AI execution
 - Two input types:
-  - User text: `{ userChatToken, message: { role: "user", lastPart: { type: "text", text } } }`
+  - User text: `{ userChatToken, message: { role: "user", lastPart: { type: "text", text } }, attachments?: [...] }`
   - Tool result: See "User Interactions" section
+- Attachments: Same format as `atypica_study_create` (upload first via `atypica_get_upload_credentials`)
 - Returns:
   ```typescript
   {
@@ -353,6 +366,53 @@ if (reportTool?.output?.reportToken) {
     updatedAt: string;   // ISO timestamp
   }
   ```
+
+### File Upload
+
+**atypica_get_upload_credentials** - Get presigned URL to upload a file
+- Input:
+  ```typescript
+  {
+    fileName: string;   // File name with extension (e.g. "design.png", "report.pdf")
+    mimeType: string;   // MIME type (e.g. "image/png", "application/pdf", "text/csv")
+  }
+  ```
+- Supported file types: images (jpeg, png, gif, webp, bmp, svg) and documents (pdf, json, csv)
+- Returns:
+  ```typescript
+  {
+    putUrl: string;     // Presigned PUT URL (5 min expiry) - upload file here
+    objectUrl: string;  // S3 object URL - pass this to create/sendMessage attachments
+    fileName: string;   // Original file name
+    mimeType: string;   // MIME type
+  }
+  ```
+
+**Upload workflow**:
+```typescript
+// 1. Get upload credentials
+const creds = await callTool("atypica_get_upload_credentials", {
+  fileName: "survey-data.pdf",
+  mimeType: "application/pdf"
+});
+const { putUrl, objectUrl } = creds.structuredContent;
+
+// 2. Upload file via HTTP PUT
+// curl -X PUT -H "Content-Type: application/pdf" --data-binary @survey-data.pdf "<putUrl>"
+
+// 3. Use objectUrl in study creation or message
+await callTool("atypica_study_create", {
+  content: "Analyze this survey data",
+  attachments: [{
+    objectUrl,
+    name: "survey-data.pdf",
+    mimeType: "application/pdf",
+    size: 102400  // file size in bytes
+  }]
+});
+```
+
+**Limits**: Max 5 images, max 3 documents, max 3MB per file, max 50MB total per message.
 
 ## Understanding Research State from Messages
 

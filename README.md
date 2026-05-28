@@ -66,7 +66,9 @@ scripts/mcp-call.sh atypica_study_create '{"content":"Your research query"}'
 
 **Artifacts**: `atypica_study_get_report`, `atypica_study_get_podcast`
 
-**Personas**: `atypica_persona_search`, `atypica_persona_get`
+**Panels & Personas**: `atypica_panel_search`, `atypica_persona_search`, `atypica_persona_get`
+
+**File Upload**: `atypica_get_upload_credentials`
 
 ## Quick Links
 

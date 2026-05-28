@@ -1,6 +1,6 @@
 # atypica Research API Reference
 
-Complete reference for all 9 MCP tools provided by atypica.ai research framework.
+Complete reference for all 10 MCP tools provided by atypica.ai research framework.
 
 ## Table of Contents
 
@@ -12,6 +12,7 @@ Complete reference for all 9 MCP tools provided by atypica.ai research framework
   - [atypica_study_list](#atypica_study_list)
   - [atypica_study_get_report](#atypica_study_get_report)
   - [atypica_study_get_podcast](#atypica_study_get_podcast)
+  - [atypica_get_upload_credentials](#atypica_get_upload_credentials)
   - [atypica_panel_search](#atypica_panel_search)
   - [atypica_persona_search](#atypica_persona_search)
   - [atypica_persona_get](#atypica_persona_get)
@@ -36,7 +37,14 @@ Create a new research session.
 **Input Schema**:
 ```typescript
 {
-  content: string  // Initial user message to start the study
+  content: string,           // Initial user message to start the study
+  panelId?: number,          // Optional panel ID to use as persona source (from atypica_panel_search)
+  attachments?: Array<{      // Optional file attachments (upload first via atypica_get_upload_credentials)
+    objectUrl: string,       // S3 object URL from upload credentials
+    name: string,            // File name
+    mimeType: string,        // MIME type
+    size: number             // File size in bytes
+  }>
 }
 ```
 
@@ -52,11 +60,27 @@ Create a new research session.
 }
 ```
 
-**Example**:
+**Examples**:
 ```json
-// Input
+// Basic - text only
 { "content": "Research young people's coffee preferences" }
 
+// With panel
+{ "content": "Interview this panel about daily routines", "panelId": 42 }
+
+// With attachments (upload via atypica_get_upload_credentials first)
+{
+  "content": "Analyze this survey data",
+  "attachments": [{
+    "objectUrl": "s3://bucket/path/survey.pdf",
+    "name": "survey.pdf",
+    "mimeType": "application/pdf",
+    "size": 102400
+  }]
+}
+```
+
+```json
 // Output
 {
   "content": [{ "type": "text", "text": "Study created successfully. Token: abc123" }],
@@ -326,6 +350,48 @@ Retrieve generated podcast content.
   }
 }
 ```
+
+---
+
+### atypica_get_upload_credentials
+
+Get a presigned URL to upload a file to S3. After uploading, pass the returned `objectUrl` to `atypica_study_create` or `atypica_study_send_message` as an attachment.
+
+**Input Schema**:
+```typescript
+{
+  fileName: string,   // File name with extension (e.g. "design.png", "report.pdf")
+  mimeType: string    // MIME type (e.g. "image/png", "application/pdf", "text/csv")
+}
+```
+
+**Supported file types**:
+- Images: jpeg, png, gif, webp, bmp, svg
+- Documents: pdf, json, csv
+
+**Output Schema**:
+```typescript
+{
+  content: [{ type: "text", text: string }],
+  structuredContent: {
+    putUrl: string,     // Presigned PUT URL (5 min expiry)
+    objectUrl: string,  // S3 object URL (pass to attachments)
+    fileName: string,   // Original file name
+    mimeType: string    // MIME type
+  }
+}
+```
+
+**Upload the file**:
+```bash
+curl -X PUT -H "Content-Type: <mimeType>" --data-binary @<fileName> "<putUrl>"
+```
+
+**Limits**:
+- Max 5 images per message
+- Max 3 documents per message
+- Max 3MB per file
+- Max 50MB total per message
 
 ---
 
@@ -742,8 +808,7 @@ try {
 
 ### Current Limitations
 
-**Phase 5 Features (Not Yet Available)**:
-- File attachments in `create` and `sendMessage`
+**Not Yet Available**:
 - Referencing historical studies
 - Custom team prompts
 - Real-time MCP notifications
