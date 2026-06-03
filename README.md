@@ -74,7 +74,7 @@ scripts/mcp-call.sh atypica_study_create '{"content":"Your research query"}'
 
 - Website: https://atypica.ai
 - Documentation: https://atypica.ai/docs/mcp
-- Issues: https://github.com/bmrlab/atypica-research-skill/issues
+- Issues: https://github.com/atypica-ai/atypica-research-skill/issues
 
 ---
 

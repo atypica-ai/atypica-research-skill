@@ -88,7 +88,7 @@ Available Tools:
   atypica_persona_get            - Get persona details
 
 Documentation:
-  https://github.com/bmrlab/atypica-research-skill
+  https://github.com/atypica-ai/atypica-research-skill
 
 EOF
   exit 1
