@@ -84,6 +84,8 @@ Available Tools:
   atypica_study_list             - List historical sessions
   atypica_study_get_report       - Get research report
   atypica_study_get_podcast      - Get podcast content
+  atypica_get_upload_credentials - Get presigned upload URL
+  atypica_panel_search           - Search persona panels
   atypica_persona_search         - Search AI personas
   atypica_persona_get            - Get persona details
 

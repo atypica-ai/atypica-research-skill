@@ -1,884 +1,485 @@
 # atypica Research API Reference
 
-Complete reference for all 10 MCP tools provided by atypica.ai research framework.
-
-## Table of Contents
-
-- [Setup](#setup)
-- [Tool Schemas](#tool-schemas)
-  - [atypica_study_create](#atypica_study_create)
-  - [atypica_study_send_message](#atypica_study_send_message)
-  - [atypica_study_get_messages](#atypica_study_get_messages)
-  - [atypica_study_list](#atypica_study_list)
-  - [atypica_study_get_report](#atypica_study_get_report)
-  - [atypica_study_get_podcast](#atypica_study_get_podcast)
-  - [atypica_get_upload_credentials](#atypica_get_upload_credentials)
-  - [atypica_panel_search](#atypica_panel_search)
-  - [atypica_persona_search](#atypica_persona_search)
-  - [atypica_persona_get](#atypica_persona_get)
-- [Complete Workflow Examples](#complete-workflow-examples)
-- [Error Handling](#error-handling)
-- [Security & Limitations](#security--limitations)
+Complete reference for all 10 MCP tools provided by the atypica.ai research framework.
 
 ## Setup
 
-**MCP Server URL**: `https://atypica.ai/mcp/study`
+The MCP server is available at `https://atypica.ai/mcp/study`. Authentication uses a Bearer token in the Authorization header. API keys follow the format `atypica_xxx`, obtained from the atypica.ai account settings page.
 
-**Authentication**: `Authorization: Bearer <api_key>`
+---
 
-Get API key from atypica.ai account settings (format: `atypica_xxx`)
-
-## Tool Schemas
-
-### atypica_study_create
+## atypica_study_create
 
 Create a new research session.
 
-**Input Schema**:
-```typescript
-{
-  content: string,           // Initial user message to start the study
-  panelId?: number,          // Optional panel ID to use as persona source (from atypica_panel_search)
-  attachments?: Array<{      // Optional file attachments (upload first via atypica_get_upload_credentials)
-    objectUrl: string,       // S3 object URL from upload credentials
-    name: string,            // File name
-    mimeType: string,        // MIME type
-    size: number             // File size in bytes
-  }>
-}
+Input:
+
 ```
-
-**Output Schema**:
-```typescript
 {
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    token: string,      // userChatToken for subsequent operations
-    studyId: number,
-    status: "created"
-  }
-}
-```
-
-**Examples**:
-```json
-// Basic - text only
-{ "content": "Research young people's coffee preferences" }
-
-// With panel
-{ "content": "Interview this panel about daily routines", "panelId": 42 }
-
-// With attachments (upload via atypica_get_upload_credentials first)
-{
-  "content": "Analyze this survey data",
-  "attachments": [{
-    "objectUrl": "s3://bucket/path/survey.pdf",
-    "name": "survey.pdf",
-    "mimeType": "application/pdf",
-    "size": 102400
+  content: string,            // Initial user message to start the study
+  panelId?: number,           // Panel ID as persona source (from atypica_panel_search)
+  attachments?: [{            // Upload first via atypica_get_upload_credentials
+    objectUrl: string,        // S3 object URL from upload credentials
+    name: string,             // File name
+    mimeType: string,         // MIME type
+    size: number              // Bytes
   }]
 }
 ```
 
-```json
-// Output
+Output:
+
+```
 {
-  "content": [{ "type": "text", "text": "Study created successfully. Token: abc123" }],
-  "structuredContent": {
-    "token": "abc123",
-    "studyId": 123,
-    "status": "created"
-  }
+  token: string,              // userChatToken for all subsequent operations
+  studyId: number,
+  status: "created"
 }
 ```
 
+Notes:
+
+- After creation, send a follow-up message via atypica_study_send_message to trigger the AI agent.
+- If attachments are provided, upload each file first using atypica_get_upload_credentials.
+
 ---
 
-### atypica_study_send_message
+## atypica_study_send_message
 
-Send or continue a study turn. The message is persisted first, then the study agent starts or resumes in background. Use `atypica_study_get_messages` to monitor progress.
+Send a user message or submit a tool-interaction result. Message is persisted, then study agent starts/resumes in background.
 
-**IMPORTANT**: Two distinct input types based on use case.
+### Type 1: User Text Message
 
-**Interaction tool result formats** (for submitting pending `requestInteraction` or `makeStudyPlan` calls):
+Input:
 
-| Pending tool | Mode | `output` shape |
-|---|---|---|
-| `tool-requestInteraction` | single-question (`input.question` present) | `{ answer: string[], plainText: string }` |
-| `tool-requestInteraction` | multi-question (`input.questions` present) | `{ answers: Array<{label: string, answer: string[]}>, plainText: string }` |
-| `tool-makeStudyPlan` | — | `{ confirmed: boolean, plainText: string }` |
-
-See [Complete Workflow Examples](#complete-workflow-examples) for full code.
-
-#### Type 1: User Text Message
-
-**Input Schema**:
-```typescript
+```
 {
   userChatToken: string,
   message: {
-    role: "user",
+    role: "user",             // Must be "user"
     lastPart: {
-      type: "text",
-      text: string
+      type: "text",           // Must be "text"
+      text: string            // The user's message content
     },
     metadata?: {
-      shouldCorrectUserMessage?: boolean
+      shouldCorrectUserMessage?: boolean  // Treat as correction of previous message
     }
   },
-  attachments?: Array<{
-    objectUrl: string,    // S3 object URL without signature
+  attachments?: [{
+    objectUrl: string,
     name: string,
     mimeType: string,
     size: number
-  }>
+  }]
 }
 ```
 
-**Example**:
-```json
-{
-  "userChatToken": "abc123",
-  "message": {
-    "role": "user",
-    "lastPart": {
-      "type": "text",
-      "text": "Start the research"
-    }
-  }
-}
+### Type 2: Tool Result Submission
+
+Used to respond to a pending tool call (requestInteraction or makeStudyPlan) found in messages.
+
+Input:
+
 ```
-
-#### Type 2: Tool Result Submission
-
-**Input Schema**:
-```typescript
 {
   userChatToken: string,
   message: {
-    id: string,              // REQUIRED: original message ID
-    role: "assistant",       // REQUIRED: must be "assistant"
+    id: string,               // REQUIRED: original message ID containing the pending tool call
+    role: "assistant",        // REQUIRED: must be "assistant"
     lastPart: {
       type: "tool-requestInteraction" | "tool-makeStudyPlan",
-      toolCallId: string,    // REQUIRED: original tool call ID
+      toolCallId: string,     // The toolCallId from the pending tool part
       state: "output-available",
-      input: object,         // Copy original AI call parameters
-      output: object         // User's response (see interaction formats)
+      input: { ... },         // Copy the original tool call's input verbatim
+      output: { ... }         // Your response (see shapes below)
     }
   }
 }
 ```
 
-**Output Schema** (same for both types):
-```typescript
+### Interaction Output Shapes
+
+For requestInteraction, single-question mode (pending input has a `question` field):
+
+```
+{ answer: string[], plainText: string }
+// answer: selected option values. Always string[] even for single-choice (maxSelect: 1).
+// plainText: human-readable summary, e.g. "User selected: 23-28"
+// To skip all options: { answer: [], plainText: "None of the above" }
+```
+
+For requestInteraction, multi-question mode (pending input has a `questions` array):
+
+```
+{ answers: [{ label: string, answer: string[] }], plainText: string }
+// One entry per question. label matches the question's label field exactly.
+// plainText: summary, e.g. "Gender: Female\nAge: 25-34"
+```
+
+For makeStudyPlan:
+
+```
+{ confirmed: boolean, plainText: string }
+// confirmed: true to approve, false to reject and restart planning
+// plainText: e.g. "User confirmed research plan"
+```
+
+### Output (both types)
+
+```
 {
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    messageId: string,
-    role: "user" | "assistant",
-    status: "running" | "saved_no_ai" | "ai_failed",
-    attachmentCount?: number,
-    reason?: string,        // Present if status is "saved_no_ai"
-    error?: string          // Present if status is "ai_failed"
-  }
+  messageId: string,
+  role: "user" | "assistant",
+  status: "running" | "saved_no_ai" | "ai_failed",
+  attachmentCount?: number,   // Present when attachments included
+  reason?: string,            // Present when status is "saved_no_ai" (e.g. "quota_exceeded")
+  error?: string              // Present when status is "ai_failed"
 }
 ```
 
-**Status Values**:
-- `"running"` - Message saved and study execution started or resumed in background
-- `"saved_no_ai"` - Message saved, quota exceeded, no AI execution
-- `"ai_failed"` - AI startup failed before the background run could continue
+Notes:
+
+- "running": message saved, AI execution started in background.
+- "saved_no_ai": message saved but quota exhausted, no AI execution.
+- "ai_failed": AI startup failed. Message is persisted. Retry by sending another message.
+- If client times out, use atypica_study_get_messages to check whether AI is still running.
+- The answer array values must match the option label strings exactly.
+- For single-choice (maxSelect: 1), still send answer as a one-element array.
 
 ---
 
-### atypica_study_get_messages
+## atypica_study_get_messages
 
-Retrieve conversation history from study session.
+Retrieve conversation history and execution status.
 
-**Input Schema**:
-```typescript
+Input:
+
+```
 {
   userChatToken: string,
-  tail?: number  // Optional: Max parts to return (from tail, most recent parts across all messages)
+  tail?: number               // Limits to last N parts across all messages. Recommended: 3-5.
 }
 ```
 
-**Output Schema**:
-```typescript
+Output:
+
+```
 {
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    messages: Array<{
-      messageId: string,
-      role: "user" | "assistant",
-      parts: Array<
-        | { type: "text", text: string }
-        | { type: "reasoning", text: string }
-        | {
-            type: "tool-requestInteraction" | "tool-makeStudyPlan" | string,
-            state: "input-available" | "output-available" | "output-error",
-            toolCallId: string,
-            input: object,
-            output?: object,
-            errorText?: string
-          }
-      >,
-      createdAt: string  // ISO 8601
-    }>
-  }
+  isRunning: boolean,         // true = AI executing, poll again. false = can interact.
+  messages: [{
+    messageId: string,
+    role: "user" | "assistant",
+    parts: [
+      { type: "text", text: string }
+      | { type: "reasoning", text: string }
+      | {
+          type: string,       // e.g. "tool-requestInteraction", "tool-makeStudyPlan", "tool-generateReport"
+          state: "input-available" | "output-available" | "output-error",
+          toolCallId: string,
+          input: { ... },
+          output?: { ... },   // Present when state is "output-available"
+          errorText?: string  // Present when state is "output-error"
+        }
+    ],
+    createdAt: string         // ISO 8601
+  }]
 }
 ```
 
-**CRITICAL**: Scan `parts` array for tool calls with `state === "input-available"` - these require user interaction.
+Notes:
 
-**Note on `tail` parameter**: When specified, returns only the last N parts across all messages. For example, if `tail: 5`, you might get 2 messages where the first has partial parts and the second has all parts, totaling 5 parts. This is useful for getting recent context without fetching the entire conversation.
-
-**Example**:
-```json
-{
-  "userChatToken": "abc123",
-  "tail": 5  // Get last 3-5 parts (increase if more context needed)
-}
-```
+- Scan parts for state === "input-available" — these require user interaction (submit via send_message Type 2).
+- With tail, you get the last N parts (newest). Useful for quick state checks without full history.
+- Without tail, returns all messages. Can be large for long studies.
+- Polling strategy: before plan confirmation every 30s, after plan confirmation every 5 min.
 
 ---
 
-### atypica_study_list
+## atypica_study_list
 
-List user's historical study sessions.
+List historical research sessions.
 
-**Input Schema**:
-```typescript
+Input:
+
+```
 {
-  page?: number,      // Default 1
-  pageSize?: number   // Default 20
+  page?: number,              // Default: 1
+  pageSize?: number           // Default: 20, max: 100
 }
 ```
 
-**Output Schema**:
-```typescript
+Output:
+
+```
 {
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    data: Array<{
-      studyId: number,
-      token: string,
-      title: string,
-      topic: string,
-      hasReport: boolean,
-      hasPodcast: boolean,
-      replayUrl: string,  // Full URL to replay the study: https://atypica.ai/study/{token}/share?replay=1
-      createdAt: string,  // ISO 8601
-      updatedAt: string
-    }>,
-    pagination: {
-      page: number,
-      pageSize: number,
-      totalCount: number,
-      totalPages: number
-    }
-  }
+  data: [{
+    studyId: number,
+    token: string,            // userChatToken to resume/query this study
+    title: string,            // Auto-generated title
+    topic: string,            // Research topic
+    hasReport: boolean,
+    hasPodcast: boolean,
+    replayUrl: string,        // https://atypica.ai/study/{token}/share?replay=1
+    createdAt: string,        // ISO 8601
+    updatedAt: string
+  }],
+  pagination: { page: number, pageSize: number, totalCount: number, totalPages: number }
 }
 ```
+
+Notes:
+
+- Ordered by most recently updated first.
+- Use the token to call get_messages or send_message on existing studies.
 
 ---
 
-### atypica_study_get_report
+## atypica_study_get_report
 
-Retrieve generated research report.
+Retrieve a generated research report.
 
-**Input Schema**:
-```typescript
+Input:
+
+```
 {
-  token: string  // Report token from study status artifacts
+  token: string               // Report token from generateReport tool output in messages
 }
 ```
 
-**Output Schema**:
-```typescript
+Output:
+
+```
 {
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    token: string,
-    instruction: string,
+  token: string,
+  instruction: string,        // The generation instruction used
+  title: string,
+  description: string,
+  content: string,            // Full report in HTML format
+  coverUrl?: string,          // Signed CDN URL, expires in 1 hour
+  shareUrl: string,           // Public: https://atypica.ai/artifacts/report/{token}/share
+  generatedAt: string,        // ISO 8601
+  createdAt: string,
+  updatedAt: string
+}
+```
+
+Notes:
+
+- The report token is found in message parts where type is "tool-generateReport" and state is "output-available", at output.reportToken.
+- coverUrl is signed and expires after 1 hour. Re-fetch if expired.
+- content is self-contained HTML.
+
+---
+
+## atypica_study_get_podcast
+
+Retrieve a generated podcast.
+
+Input:
+
+```
+{
+  token: string               // Podcast token from generatePodcast tool output in messages
+}
+```
+
+Output:
+
+```
+{
+  token: string,
+  instruction: string,        // The generation instruction used
+  script: string,             // Full podcast transcript
+  audioUrl?: string,          // Signed CDN URL for audio, expires in 1 hour
+  coverUrl?: string,          // Signed CDN URL for cover image, expires in 1 hour
+  metadata: {
     title: string,
-    description: string,
-    content: string,        // HTML format
-    coverUrl?: string,      // Signed CDN URL (1 hour expiry)
-    shareUrl: string,       // Full shareable URL: https://atypica.ai/artifacts/report/{token}/share
-    generatedAt: string,    // ISO 8601
-    createdAt: string,
-    updatedAt: string
-  }
+    duration: number,         // Seconds
+    size: number,             // Bytes
+    mimeType: string,         // e.g. "audio/mpeg"
+    showNotes: string
+  },
+  shareUrl: string,           // Public: https://atypica.ai/artifacts/podcast/{token}/share
+  generatedAt: string,        // ISO 8601
+  createdAt: string,
+  updatedAt: string
 }
 ```
+
+Notes:
+
+- The podcast token is found in message parts where type is "tool-generatePodcast" and state is "output-available", at output.podcastToken.
+- audioUrl and coverUrl are signed and expire after 1 hour.
 
 ---
 
-### atypica_study_get_podcast
+## atypica_get_upload_credentials
 
-Retrieve generated podcast content.
+Get a presigned URL to upload a file. After uploading via HTTP PUT, use the objectUrl as attachment reference.
 
-**Input Schema**:
-```typescript
+Input:
+
+```
 {
-  token: string  // Podcast token from study status artifacts
+  fileName: string,           // With extension, e.g. "survey.pdf"
+  mimeType: string            // e.g. "image/png", "application/pdf", "text/csv"
 }
 ```
 
-**Output Schema**:
-```typescript
+Output:
+
+```
 {
-  content: [{ type: "text", text: string }],
-  structuredContent: {
+  putUrl: string,             // Presigned PUT URL. Expires in 5 minutes.
+  objectUrl: string,          // Permanent S3 URL to reference in attachments.
+  fileName: string,
+  mimeType: string
+}
+```
+
+Notes:
+
+- Supported images: jpeg, png, gif, webp, bmp, svg.
+- Supported documents: pdf, json, csv.
+- Upload: HTTP PUT to putUrl with Content-Type header matching mimeType, file as body.
+- putUrl is single-use and expires after 5 minutes.
+- Limits per message: max 5 images, max 3 documents, max 3MB per file, max 50MB total.
+
+---
+
+## atypica_panel_search
+
+Search persona panels. Each panel is a curated group of AI personas used as research subject pool.
+
+Input:
+
+```
+{
+  query?: string,             // Filter by title, case-insensitive. Without query, returns all.
+  page?: number,              // Default: 1
+  pageSize?: number           // Default: 20, max: 50
+}
+```
+
+Output:
+
+```
+{
+  data: [{
+    panelId: number,
+    title: string,
+    personaCount: number,
+    createdAt: string,        // ISO 8601
+    updatedAt: string
+  }],
+  pagination: { page: number, pageSize: number, totalCount: number, totalPages: number }
+}
+```
+
+Notes:
+
+- Pass panelId to atypica_study_create to use that panel as the persona source.
+- Without query, all accessible panels are returned.
+
+---
+
+## atypica_persona_search
+
+Search AI personas using text matching.
+
+Input:
+
+```
+{
+  query?: string,             // Text search over name/source fields
+  privateOnly?: boolean,      // true = only caller's own private personas. Default: false.
+  limit?: number              // Default: 10, max: 50
+}
+```
+
+Output:
+
+```
+{
+  data: [{
+    personaId: number,
     token: string,
-    instruction: string,
-    script: string,
-    audioUrl?: string,      // Signed CDN URL (1 hour expiry)
-    coverUrl?: string,      // Signed CDN URL (1 hour expiry)
-    metadata: {
-      title: string,
-      duration: number,     // Seconds
-      size: number,         // Bytes
-      mimeType: string,     // e.g., "audio/mpeg"
-      showNotes: string
-    },
-    shareUrl: string,       // Full shareable URL: https://atypica.ai/artifacts/podcast/{token}/share
-    generatedAt: string,    // ISO 8601
-    createdAt: string,
-    updatedAt: string
-  }
+    name: string,
+    source: string,           // Origin/background description
+    tier: number,             // Access tier 0-3
+    tags: string[],
+    createdAt: string         // ISO 8601
+  }]
 }
 ```
+
+Notes:
+
+- With query: uses indexed text search.
+- Without query: returns the latest visible personas (public + caller's private).
+- privateOnly: true restricts to only the caller's own personas.
 
 ---
 
-### atypica_get_upload_credentials
+## atypica_persona_get
 
-Get a presigned URL to upload a file to S3. After uploading, pass the returned `objectUrl` to `atypica_study_create` or `atypica_study_send_message` as an attachment.
+Get full details of a persona including its complete prompt.
 
-**Input Schema**:
-```typescript
-{
-  fileName: string,   // File name with extension (e.g. "design.png", "report.pdf")
-  mimeType: string    // MIME type (e.g. "image/png", "application/pdf", "text/csv")
-}
+Input:
+
 ```
-
-**Supported file types**:
-- Images: jpeg, png, gif, webp, bmp, svg
-- Documents: pdf, json, csv
-
-**Output Schema**:
-```typescript
-{
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    putUrl: string,     // Presigned PUT URL (5 min expiry)
-    objectUrl: string,  // S3 object URL (pass to attachments)
-    fileName: string,   // Original file name
-    mimeType: string    // MIME type
-  }
-}
-```
-
-**Upload the file**:
-```bash
-curl -X PUT -H "Content-Type: <mimeType>" --data-binary @<fileName> "<putUrl>"
-```
-
-**Limits**:
-- Max 5 images per message
-- Max 3 documents per message
-- Max 3MB per file
-- Max 50MB total per message
-
----
-
-### atypica_panel_search
-
-Search the user's persona panels. Each panel is a curated group of AI personas that can be used as the research subject pool for a study.
-
-**Input Schema**:
-```typescript
-{
-  query?: string,      // Optional: filter panels by title (case-insensitive). Without a query, returns all panels.
-  page?: number,       // Default 1
-  pageSize?: number    // Default 20, max 50
-}
-```
-
-**Output Schema**:
-```typescript
-{
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    data: Array<{
-      panelId: number,
-      title: string,
-      personaCount: number,
-      createdAt: string,  // ISO 8601
-      updatedAt: string
-    }>,
-    pagination: {
-      page: number,
-      pageSize: number,
-      totalCount: number,
-      totalPages: number
-    }
-  }
-}
-```
-
-**Example**:
-```json
-// List all panels
-{}
-
-// Search by title
-{ "query": "coffee" }
-```
-
----
-
-### atypica_persona_search
-
-Search AI personas using semantic embedding similarity.
-
-**Input Schema**:
-```typescript
-{
-  query?: string,   // Optional: semantic search query
-  privateOnly?: boolean,  // Optional: true = only your own private personas
-  limit?: number    // Default 10, max 50
-}
-```
-
-**Search Logic**:
-- With `query`: Uses indexed text search over visible personas
-- Without `query`: Returns the latest visible personas
-- `privateOnly: true`: Restricts results to the caller's own private personas
-
-**Output Schema**:
-```typescript
-{
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    data: Array<{
-      personaId: number,
-      token: string,
-      name: string,
-      source: string,
-      tier: number,
-      tags: string[],
-      createdAt: string  // ISO 8601
-    }>
-  }
-}
-```
-
-**Example**:
-```json
-// Semantic search
-{
-  "query": "young tech enthusiasts",  // Matches "programmers", "geeks", etc.
-  "privateOnly": true,
-  "limit": 10
-}
-```
-
----
-
-### atypica_persona_get
-
-Get detailed persona information including full prompt.
-
-**Input Schema**:
-```typescript
 {
   personaId: number
 }
 ```
 
-**Output Schema**:
-```typescript
+Output:
+
+```
 {
-  content: [{ type: "text", text: string }],
-  structuredContent: {
-    personaId: number,
-    token: string,
-    name: string,
-    source: string,
-    prompt: string,       // Full persona description
-    tier: number,
-    tags: string[],
-    locale: string,
-    createdAt: string,    // ISO 8601
-    updatedAt: string
-  }
+  personaId: number,
+  token: string,
+  name: string,
+  source: string,
+  prompt: string,             // Full persona system prompt text
+  tier: number,               // 0-3
+  tags: string[],
+  locale: string,             // e.g. "en-US", "zh-CN"
+  createdAt: string,          // ISO 8601
+  updatedAt: string
 }
 ```
 
----
+Notes:
 
-## Complete Workflow Examples
-
-### Example 1: Basic Research Flow
-
-```typescript
-// 1. Create study
-const createResult = await mcp.callTool("atypica_study_create", {
-  content: "Research young people's coffee preferences"
-});
-const userChatToken = createResult.structuredContent.token;
-
-// 2. Send initial message (AI enters Plan Mode)
-await mcp.callTool("atypica_study_send_message", {
-  userChatToken,
-  message: {
-    role: "user",
-    lastPart: { type: "text", text: "Start research" }
-  }
-});
-
-// 3. Poll for interactions and completion
-while (true) {
-  const result = await mcp.callTool("atypica_study_get_messages", {
-    userChatToken
-  });
-
-  // Check if AI is still executing
-  if (result.structuredContent.isRunning) {
-    await sleep(5000);  // Wait 5 seconds
-    continue;
-  }
-
-  // Check for pending interactions
-  const lastMsg = result.structuredContent.messages[result.structuredContent.messages.length - 1];
-  const pendingTool = lastMsg?.parts?.find(
-    p => p.type.startsWith("tool-") && p.state === "input-available"
-  );
-
-  if (pendingTool) {
-    // Handle interaction (see Example 2 below)
-    await handleInteraction(userChatToken, lastMsg.messageId, pendingTool);
-    continue;
-  }
-
-  // 4. Check if report is ready
-  const reportTool = result.structuredContent.messages
-    .flatMap(m => m.parts)
-    .find(p => p.type === "tool-generateReport" && p.state === "output-available");
-
-  if (reportTool?.output?.reportToken) {
-    // 5. Get report
-    const report = await mcp.callTool("atypica_study_get_report", {
-      token: reportTool.output.reportToken
-    });
-    console.log(report.structuredContent.content);  // HTML report
-    break;
-  }
-
-  break;  // No more work to do
-}
-```
-
-### Example 2: Handling requestInteraction
-
-Two modes — check for `input.questions` to distinguish them.
-
-```typescript
-async function handleRequestInteraction(userChatToken, messageId, toolPart) {
-  const input = toolPart.input;
-
-  if (input.questions) {
-    // ── Multi-question mode ──
-    // Render each question as a separate tab; collect one answer array per question
-    const answers = [];
-    for (const q of input.questions) {
-      console.log(`[${q.label}] ${q.question}`);
-      q.options.forEach((opt, i) => console.log(`  ${i + 1}. ${opt}`));
-
-      const selected = q.maxSelect === 1
-        ? [await getUserSingleChoice(q.options)]
-        : await getUserMultiChoice(q.options, q.maxSelect);
-
-      answers.push({ label: q.label, answer: selected });
-    }
-
-    const plainText = answers
-      .map(a => `${a.label}: ${a.answer.join(", ")}`)
-      .join("\n");
-
-    await mcp.callTool("atypica_study_send_message", {
-      userChatToken,
-      message: {
-        id: messageId,
-        role: "assistant",
-        lastPart: {
-          type: "tool-requestInteraction",
-          toolCallId: toolPart.toolCallId,
-          state: "output-available",
-          input: toolPart.input,
-          output: { answers, plainText }
-        }
-      }
-    });
-
-  } else {
-    // ── Single-question mode ──
-    console.log(input.question);
-    input.options.forEach((opt, i) => console.log(`${i + 1}. ${opt}`));
-
-    const selected = input.maxSelect === 1
-      ? [await getUserSingleChoice(input.options)]
-      : await getUserMultiChoice(input.options, input.maxSelect);
-
-    // If user skips: send answer: [], plainText: "None of the above"
-    await mcp.callTool("atypica_study_send_message", {
-      userChatToken,
-      message: {
-        id: messageId,
-        role: "assistant",
-        lastPart: {
-          type: "tool-requestInteraction",
-          toolCallId: toolPart.toolCallId,
-          state: "output-available",
-          input: toolPart.input,
-          output: {
-            answer: selected,          // string[] always, even for single-choice
-            plainText: `User selected: ${selected.join(", ")}`
-          }
-        }
-      }
-    });
-  }
-}
-```
-
-### Example 3: Handling makeStudyPlan
-
-```typescript
-async function handleMakeStudyPlan(userChatToken, messageId, toolPart) {
-  // Display plan to user
-  console.log("=== Research Plan ===");
-  console.log(toolPart.input.planContent);  // Markdown format
-  console.log("\n1. Confirm");
-  console.log("2. Cancel");
-
-  const confirmed = await getUserConfirmation();  // Returns boolean
-
-  // Submit decision
-  await mcp.callTool("atypica_study_send_message", {
-    userChatToken,
-    message: {
-      id: messageId,
-      role: "assistant",
-      lastPart: {
-        type: "tool-makeStudyPlan",
-        toolCallId: toolPart.toolCallId,
-        state: "output-available",
-        input: toolPart.input,
-        output: {
-          confirmed,  // boolean: true for confirm, false for cancel
-          plainText: `User ${confirmed ? "confirmed" : "cancelled"} research plan`
-        }
-      }
-    }
-  });
-}
-```
-
-### Example 4: Semantic Persona Search
-
-```typescript
-// Find personas matching semantic query
-const personas = await mcp.callTool("atypica_persona_search", {
-  query: "young coffee enthusiasts",  // Semantic similarity
-  limit: 10
-});
-
-// Get full details for first persona
-const personaDetails = await mcp.callTool("atypica_persona_get", {
-  personaId: personas.structuredContent.data[0].personaId
-});
-
-console.log(personaDetails.structuredContent.prompt);  // Full persona description
-```
+- The prompt field contains the full text used as the AI persona's system prompt.
+- Persona details don't change often — safe to cache locally.
 
 ---
 
 ## Error Handling
 
-### JSON-RPC Error Codes
+All errors follow JSON-RPC 2.0 format: `{ error: { code: number, message: string } }`
 
-```typescript
-{
-  jsonrpc: "2.0",
-  error: {
-    code: number,
-    message: string
-  },
-  id: null
-}
-```
-
-**Error Code Reference**:
-- `-32001` - Unauthorized (invalid API key)
-- `-32602` - Invalid params (check input schema)
-- `-32603` - Internal error (server issue, check logs)
-- `-32000` - Business error (e.g., study not found, unauthorized access)
-
-### Common Error Scenarios
-
-**Unauthorized**:
-```json
-{ "error": { "code": -32001, "message": "Invalid API key" } }
-```
-- Verify API key format: `atypica_xxx`
-- Check key not expired in account settings
-- Ensure Authorization header set correctly
-
-**Study Not Found**:
-```json
-{ "error": { "code": -32000, "message": "Study not found" } }
-```
-- Verify `userChatToken` is correct
-- Study may have been deleted
-- Check using correct user account
-
-**Quota Exceeded**:
-```json
-// Not an error - check sendMessage response status
-{
-  "structuredContent": {
-    "status": "saved_no_ai",
-    "reason": "quota_exceeded"
-  }
-}
-```
-- Message saved but AI didn't execute
-- User needs to upgrade plan
-
-**AI Execution Failed**:
-```json
-{
-  "structuredContent": {
-    "status": "ai_failed",
-    "error": "Error message here"
-  }
-}
-```
-- Message already saved in database
-- Can retry by sending another message
-
-### Timeout Handling
-
-If your MCP client times out or disconnects while calling `sendMessage`:
-
-```typescript
-try {
-  await mcp.callTool("atypica_study_send_message", {
-    userChatToken,
-    message: { ... }
-  });
-} catch (timeoutError) {
-  // Check if AI is still working
-  const result = await mcp.callTool("atypica_study_get_messages", {
-    userChatToken
-  });
-
-  if (result.structuredContent.isRunning) {
-    console.log("AI still working, continue polling...");
-    // Keep polling getMessages until isRunning becomes false
-  }
-}
-```
+- **-32001 Unauthorized**: Invalid, expired, or missing API key. Verify format (`atypica_xxx`) and Bearer scheme.
+- **-32602 Invalid params**: Field type mismatch or constraint violation.
+- **-32603 Internal error**: Server-side failure. Safe to retry after brief delay.
+- **-32000 Business error**: Study not found, unauthorized access.
+- **Quota exceeded**: Not a JSON-RPC error. sendMessage returns status "saved_no_ai" with reason "quota_exceeded".
+- **AI failed**: sendMessage returns status "ai_failed" with error message. Message is persisted, retry by sending another.
+- **Timeout**: If sendMessage times out, poll getMessages — AI may still be running.
+- **Retry guidance**: All read operations are idempotent and safe to retry.
 
 ---
 
-## Security & Limitations
+## Security and Limitations
 
-### Authentication & Authorization
-
-- **API Key Scope**: User-scoped only (not team-scoped)
-- **Ownership Verification**: All operations verify resource ownership
-- **Token Isolation**: Tokens are globally unique but require ownership check
-- **CDN Signatures**: File URLs are signed and expire after 1 hour
-
-### Current Limitations
-
-**Not Yet Available**:
-- Referencing historical studies
-- Custom team prompts
-- Real-time MCP notifications
-
-**MCP-Specific Limitations**:
-- Team API keys not supported (returns 403 error)
-- Maximum message history: 100 messages per request
-- Persona search can return public personas plus the caller's own private personas
-
-### Rate Limits & Quotas
-
-- API calls follow standard rate limits
-- Token consumption tracked per user
-- `sendMessage` returns after the run is accepted; execution continues in background and often finishes within 10-120s
-- Concurrent study sessions: No hard limit
-
-### Data Privacy
-
-- User data isolated per account
-- Studies and personas not shared between users
-- AI responses saved to user's account only
-- CDN URLs time-limited to prevent unauthorized access
-
----
-
-## Performance Optimization
-
-### Best Practices
-
-1. **Parallel Operations**: Run independent calls concurrently
-   ```typescript
-   const [report, podcast] = await Promise.all([
-     mcp.callTool("atypica_study_get_report", { token: reportToken }),
-     mcp.callTool("atypica_study_get_podcast", { token: podcastToken })
-   ]);
-   ```
-
-2. **Use Tail Parameter for Recent Context**: Use `tail` to limit parts returned
-   ```typescript
-   // Get last 5 parts for quick context
-   const recentMessages = await mcp.callTool("atypica_study_get_messages", {
-     userChatToken,
-     tail: 5  // Start with 3-5, increase if more context needed
-   });
-   ```
-
-3. **Poll with getMessages**: Check `isRunning` to know when AI completes
-   ```typescript
-   async function waitForCompletion(userChatToken) {
-     while (true) {
-       const result = await mcp.callTool("atypica_study_get_messages", {
-         userChatToken
-       });
-
-       if (!result.structuredContent.isRunning) {
-         return result;  // AI finished
-       }
-
-       await sleep(5000);  // Poll every 5 seconds
-     }
-   }
-   ```
-
-4. **Cache Personas**: Store persona search results locally
-   ```typescript
-   const cachedPersonas = {};
-   async function getPersona(personaId) {
-     if (!cachedPersonas[personaId]) {
-       cachedPersonas[personaId] = await mcp.callTool("atypica_persona_get", { personaId });
-     }
-     return cachedPersonas[personaId];
-   }
-   ```
+- API keys are user-scoped only. Team keys return 403.
+- All operations verify resource ownership.
+- CDN URLs (cover, audio) are signed and expire after 1 hour.
+- Upload presigned URLs expire after 5 minutes, single-use.
+- Max 5 images, 3 documents per message. Max 3MB per file. Max 50MB total per message.
+- Max 100 messages returned per get_messages request.
+- Persona search returns public personas plus caller's own private personas.
+- Not available via MCP: referencing historical studies in new ones, custom team prompts, real-time push notifications.
+- Data isolation: per-user account. Studies and personas not shared between users. AI responses saved to user's account only.
