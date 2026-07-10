@@ -148,7 +148,7 @@ study_create → send_message → [AI runs in background]
 | Tool                     | Description                                           |
 | ------------------------ | ----------------------------------------------------- |
 | `atypica_panel_search`   | Search persona panels (curated groups of AI personas) |
-| `atypica_persona_search` | Semantic search for individual AI personas            |
+| `atypica_persona_search` | Text search for individual AI personas                |
 | `atypica_persona_get`    | Get persona details including full prompt             |
 
 ### File Upload
