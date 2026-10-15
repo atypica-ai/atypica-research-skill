@@ -235,8 +235,7 @@ Two tools require user input. Detect them by `state === "input-available"` in me
       "state": "output-available",
       "input": { "question": "...", "options": [...], "maxSelect": 1 },
       "output": {
-        "answer": ["23-28"],
-        "plainText": "User selected: 23-28"
+        "answer": ["23-28"]
       }
     }
   }
@@ -253,8 +252,7 @@ Two tools require user input. Detect them by `state === "input-available"` in me
     "answers": [
       { "label": "Gender", "answer": ["Female"] },
       { "label": "Age", "answer": ["25-34"] }
-    ],
-    "plainText": "Gender: Female\nAge: 25-34"
+    ]
   }
 }
 ```
@@ -264,8 +262,7 @@ Two tools require user input. Detect them by `state === "input-available"` in me
 ```json
 {
   "output": {
-    "confirmed": true,
-    "plainText": "User confirmed research plan"
+    "confirmed": true
   }
 }
 ```

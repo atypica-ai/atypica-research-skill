@@ -102,26 +102,23 @@ Input:
 For requestInteraction, single-question mode (pending input has a `question` field):
 
 ```
-{ answer: string[], plainText: string }
+{ answer: string[] }
 // answer: selected option values. Always string[] even for single-choice (maxSelect: 1).
-// plainText: human-readable summary, e.g. "User selected: 23-28"
-// To skip all options: { answer: [], plainText: "None of the above" }
+// To skip all options: { skipped: true }
 ```
 
 For requestInteraction, multi-question mode (pending input has a `questions` array):
 
 ```
-{ answers: [{ label: string, answer: string[] }], plainText: string }
+{ answers: [{ label: string, answer: string[] }] }
 // One entry per question. label matches the question's label field exactly.
-// plainText: summary, e.g. "Gender: Female\nAge: 25-34"
 ```
 
 For makeStudyPlan:
 
 ```
-{ confirmed: boolean, plainText: string }
+{ confirmed: boolean }
 // confirmed: true to approve, false to reject and restart planning
-// plainText: e.g. "User confirmed research plan"
 ```
 
 ### Output (both types)
