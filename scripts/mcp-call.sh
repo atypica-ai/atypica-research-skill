@@ -65,7 +65,7 @@ Examples:
   # Create research session
   mcp-call.sh atypica_study_create '{"content":"Research coffee preferences"}'
 
-  # Get messages with tail parameter
+  # Get the last 10 conversation entries
   mcp-call.sh atypica_study_get_messages '{"userChatToken":"abc123","tail":10}'
 
   # Pass token as option

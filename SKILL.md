@@ -53,7 +53,7 @@ One question is one study.
 | `tool_result`    | Ask the user (see "When the agent asks"), then `atypica_study_submit_tool_result` with their answer |
 | `artifact_ready` | Fetch the report or podcast with `next.token` and deliver it                                        |
 | `text_message`   | Relay what the agent said; send the user's reply with `atypica_study_send_text_message`             |
-| `stalled`        | Send `"Please continue the research"` as a text message; `next.error` says why the last run stopped |
+| `stalled`        | Send `"Please continue the research"` as a text message                                             |
 
 Write results carry a `status`: `running` (the agent started), `saved_no_ai` (out of credits: tell the user), `saved_while_running` (saved, but another write started the agent first: do not write it again; once `next` leaves `running`, send a short message to continue), `ai_failed` (write again). A write while the agent runs is rejected; wait for `next` to leave `running`.
 

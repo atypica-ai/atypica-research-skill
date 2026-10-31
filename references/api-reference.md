@@ -133,14 +133,14 @@ Output: a [write result](#write-result).
 
 ### atypica_study_get_messages
 
-Reads a study: what to do next, what it has done so far, and its messages.
+Reads a study: what to do next, what it has done so far, and its conversation.
 
 Input:
 
 ```ts
 {
   userChatToken: string
-  tail?: integer                 // keep only the last N parts across all messages; does not change next or steps
+  tail?: integer                 // keep only the last N conversation entries; does not change next or steps
 }
 ```
 
@@ -152,18 +152,31 @@ Output:
   next: Next
   steps: Step[]
   replayUrl: string              // https://atypica.ai/study/<token>/share?replay=1
-  messages: {
-    messageId: string
-    role: "user" | "assistant"
-    parts: UIMessagePart[]       // AI SDK UI message parts: text, reasoning, tool-<name> with state/input/output
-    createdAt?: string
-  }[]
+  conversation: Entry[]
 }
+
+// What the user and the research agent said to each other, in order (src/app/(study)/tools/conversation.ts).
+// The research the agent ran is in steps; its reasoning and other tool calls are not returned.
+type Entry =
+  | { type: "user"; text: string; createdAt?: string }
+  | { type: "agent"; text: string; createdAt?: string }
+  | {
+      type: "question"           // the agent asked the user to choose (tool-requestInteraction)
+      questions: { label?: string; question: string; options: string[] }[]
+      answer?: { label?: string; answer: string[] }[] | "skipped"   // absent while unanswered
+      createdAt?: string
+    }
+  | {
+      type: "plan"               // the agent asked the user to confirm a plan (tool-makeStudyPlan)
+      plan: string               // markdown
+      confirmed?: boolean        // absent while unanswered
+      createdAt?: string
+    }
 ```
 
 `replayUrl` opens without sign-in and shows the study as it was when opened; reloading brings it up to date.
 
-The text content holds `next`, `replayUrl`, the steps and the last 3000 characters of the messages' text.
+The text content holds `next`, `replayUrl`, the steps and the last 3000 characters of the conversation.
 
 #### next
 
@@ -183,11 +196,11 @@ type Next =
       artifactType: "report" | "podcast";
       token: string;
     }
-  | { kind: "stalled"; error?: string } // the last run failed (error) or stopped; send a text message to start again
+  | { kind: "stalled" } // the last run failed or stopped; send a text message to start again
   | { kind: "text_message" }; // the agent spoke and stopped; relay it, send the user's reply as text
 ```
 
-When the last run failed, `stalled` with `error` comes before `text_message`: a failed run often ends in half a sentence.
+When the last run failed, `stalled` comes before `text_message`: a failed run often ends in half a sentence. Why it failed is not returned; it stays in the server log.
 
 #### steps
 
@@ -222,9 +235,9 @@ type State = "running" | "done" | "failed" | "interrupted";
 | `kind`               | `brief` | `summary`                | `details`                                         | `records`            |
 | -------------------- | ------- | ------------------------ | ------------------------------------------------- | -------------------- |
 | `social_observation` | yes     | `scoutSocialTrends` only | `platforms?`, `searches?` (searches per platform) | one: the observation |
-| `personas`           | no      | no                       | `personas: { personaId, name, tags }[]`, `error?` | none                 |
-| `interviews`         | yes     | yes                      | `error?`                                          | one per persona      |
-| `discussion`         | yes     | yes                      | `error?`                                          | one: the discussion  |
+| `personas`           | no      | no                       | `personas: { personaId, name, tags }[]`           | none                 |
+| `interviews`         | yes     | yes                      | none                                              | one per persona      |
+| `discussion`         | yes     | yes                      | none                                              | one: the discussion  |
 | `audience_call`      | yes     | yes                      | none                                              | none                 |
 | `desk_research`      | yes     | yes                      | `sources?` (count)                                | none                 |
 | `report`             | no      | no                       | `token?`                                          | none                 |
@@ -352,14 +365,9 @@ Output:
   script: string
   audioUrl: string | null        // proxy CDN link, does not expire; null until the audio exists
   coverUrl?: string              // proxy CDN link, does not expire
-  metadata?: {                   // as stored with the podcast
-    title?: string
-    duration?: number            // seconds
-    size?: number                // bytes
-    mimeType?: string
-    showNotes?: string
-    coverObjectUrl?: string
-  }
+  title?: string
+  duration?: number              // seconds
+  showNotes?: string
   shareUrl: string               // https://atypica.ai/artifacts/podcast/<token>/share
   generatedAt?: string
   createdAt: string
