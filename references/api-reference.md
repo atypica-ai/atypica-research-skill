@@ -1,482 +1,467 @@
 # atypica Research API Reference
 
-Complete reference for all 10 MCP tools provided by the atypica.ai research framework.
+Every tool of the MCP server at `https://atypica.ai/mcp/study`, with its input and output. The same tools are on the unified server `https://atypica.ai/mcp`, together with human interviews and desk research.
 
-## Setup
+## Conventions
 
-The MCP server is available at `https://atypica.ai/mcp/study`. Authentication uses a Bearer token in the Authorization header. API keys follow the format `atypica_xxx`, obtained from the atypica.ai account settings page.
+**Transport and sign-in.** Streamable HTTP, JSON-RPC 2.0, at `https://atypica.ai/mcp/study`. Send `Authorization: Bearer atypica_…`, an API key from https://atypica.ai/account/api-keys. It acts as the account the user signed in as (a personal account or a team member) and spends that account's credits. A missing or invalid key is HTTP 401.
 
----
+**Results.** Every tool returns `content` (one text block, for clients that read only text) and, on success, `structuredContent` (the JSON below). The two say the same thing. A failure is a normal result with `isError: true` and one sentence in the text, not a JSON-RPC error:
 
-## atypica_study_create
+- one the client can act on (not found, still running, a wrong answer shape) says what to do;
+- an unexpected one says only that something went wrong on atypica's side; the cause stays in the server log.
 
-Create a new research session.
+Input that does not match the schema is the same kind of failure: `isError: true`, and the text starts with `MCP error -32602: Input validation error` and names the field.
+
+**Ownership.** A token or id that belongs to another account gives the same "not found" as one that does not exist.
+
+**Links.** Public pages (study replay, report and podcast share, interview invite) are absolute URLs on the site the request came to: `https://atypica.ai` in production. They open without sign-in.
+
+**Notation.** Shapes are TypeScript-like. `?` marks an optional field; dates are ISO 8601 strings.
+
+**Annotations.** Read tools: `readOnlyHint: true`. Write tools: `readOnlyHint: false, destructiveHint: false`.
+
+## The loop
+
+A study: AI-simulated consumers are interviewed and discuss the user's question; the agent writes a report. One question is one study, named by its `userChatToken`. The research agent runs in the background; after the user confirms the plan it usually runs half an hour to an hour.
+
+```
+atypica_study_create ──► agent runs
+  └─► atypica_study_get_messages (poll), then by next.kind:
+        running         poll again; tell the user what changed in steps
+        tool_result     atypica_study_submit_tool_result with the user's answer
+        artifact_ready  atypica_study_get_report / atypica_study_get_podcast
+        text_message    atypica_study_send_text_message with the user's reply
+        stalled         atypica_study_send_text_message ("Please continue the research")
+```
+
+## Tools
+
+### atypica_study_create
+
+Starts a study with the user's question as its first message. The research agent starts at once.
 
 Input:
 
-```
+```ts
 {
-  content: string,            // Initial user message to start the study
-  panelId?: number,           // Panel ID as persona source (from atypica_panel_search)
-  attachments?: [{            // Upload first via atypica_get_upload_credentials
-    objectUrl: string,        // S3 object URL from upload credentials
-    name: string,             // File name
-    mimeType: string,         // MIME type
-    size: number              // Bytes
-  }]
+  content: string                // the user's research question; at least 1 character
+  panelId?: integer              // use this panel's personas (atypica_panel_search) instead of building new ones
+  attachments?: Attachment[]
+}
+
+type Attachment = {
+  objectUrl: string              // from atypica_get_upload_credentials, after the PUT
+  name: string
+  mimeType: string
+  size: number                   // bytes
+}
+```
+
+Output: the study plus a [write result](#write-result).
+
+```ts
+{
+  token: string                  // the study's userChatToken
+  studyId: number
+  messageId?: string
+  status: "running" | "saved_no_ai" | "saved_while_running" | "ai_failed"
+  reason?: "quota_exceeded"      // with saved_no_ai
+}
+```
+
+### Write result
+
+What `atypica_study_create`, `atypica_study_send_text_message` and `atypica_study_submit_tool_result` return after writing. The study page on atypica.ai writes the same way.
+
+| Case                                             | `isError` | `structuredContent`                                                                                                                                                                |
+| ------------------------------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Saved, the agent is running                      | no        | `{ messageId, status: "running", attachmentCount? }`                                                                                                                               |
+| Saved, the account has no credits                | no        | `{ messageId, status: "saved_no_ai", reason: "quota_exceeded", attachmentCount? }`                                                                                                 |
+| Saved, the agent did not start                   | no        | `{ messageId, status: "ai_failed", attachmentCount? }`; write again to retry                                                                                                       |
+| Saved, but another write started the agent first | no        | `{ messageId, status: "saved_while_running", attachmentCount? }`; do not write it again: that run does not read it; once `next` leaves `running`, send a short message to continue |
+| The agent was already running                    | yes       | none; nothing was saved                                                                                                                                                            |
+| A tool result in the wrong shape                 | yes       | none; nothing was saved; the text names the problem                                                                                                                                |
+| No tool call with that id is waiting             | yes       | none; nothing was saved                                                                                                                                                            |
+| Too many or unsupported attachments              | yes       | none; nothing was saved                                                                                                                                                            |
+| The study does not exist or is not the caller's  | yes       | none                                                                                                                                                                               |
+
+`attachmentCount` is present on `atypica_study_send_text_message`.
+
+### atypica_study_send_text_message
+
+Writes a text message from the user into a study and starts the agent on it: a follow-up, a correction, the reply to something the agent said, "please continue".
+
+Input:
+
+```ts
+{
+  userChatToken: string
+  text: string                   // in the user's words
+  attachments?: Attachment[]
+}
+```
+
+Output: a [write result](#write-result).
+
+Attachments count over the whole study: at most 5 images and 10 documents, 3 MB per file, 50 MB in total. Images: jpeg, png, gif, webp, bmp, svg. Documents: pdf, doc, docx, xls, xlsx, ppt, pptx, txt, md, json, csv.
+
+### atypica_study_submit_tool_result
+
+Answers a tool call the agent left for the user, reported by `atypica_study_get_messages` as `next.kind: "tool_result"`. The server finds the waiting call in the study's last message and keeps its input; the client sends only the id and the answer. The answer is validated against that tool's output schema before it is saved.
+
+Input:
+
+```ts
+{
+  userChatToken: string
+  toolCallId: string             // next.toolCallId
+  output: unknown                // the user's answer, shaped by next.toolType:
+}
+
+// tool-requestInteraction, one question (input has `question`):
+{ answer: string[] }             // option texts copied exactly; an array even for one choice
+// tool-requestInteraction, several questions (input has `questions`):
+{ answers: { label: string, answer: string[] }[] }
+// tool-requestInteraction, the user declined:
+{ skipped: true }
+// tool-makeStudyPlan:
+{ confirmed: boolean }           // false: the agent plans again; send the user's changes as a text message
+```
+
+Output: a [write result](#write-result).
+
+### atypica_study_get_messages
+
+Reads a study: what to do next, what it has done so far, and its messages.
+
+Input:
+
+```ts
+{
+  userChatToken: string
+  tail?: integer                 // keep only the last N parts across all messages; does not change next or steps
 }
 ```
 
 Output:
 
-```
+```ts
 {
-  token: string,              // userChatToken for all subsequent operations
-  studyId: number,
-  status: "created"
+  isRunning: boolean
+  next: Next
+  steps: Step[]
+  replayUrl: string              // https://atypica.ai/study/<token>/share?replay=1
+  messages: {
+    messageId: string
+    role: "user" | "assistant"
+    parts: UIMessagePart[]       // AI SDK UI message parts: text, reasoning, tool-<name> with state/input/output
+    createdAt?: string
+  }[]
 }
 ```
 
-Notes:
+`replayUrl` opens without sign-in and shows the study as it was when opened; reloading brings it up to date.
 
-- After creation, send a follow-up message via atypica_study_send_message to trigger the AI agent.
-- If attachments are provided, upload each file first using atypica_get_upload_credentials.
+The text content holds `next`, `replayUrl`, the steps and the last 3000 characters of the messages' text.
 
----
+#### next
 
-## atypica_study_send_message
+What the client does now, decided by the server. One kind at a time, checked in this order:
 
-Send a user message or submit a tool-interaction result. Message is persisted, then study agent starts/resumes in background.
+```ts
+type Next =
+  | { kind: "running" } // poll again in 1–2 minutes
+  | {
+      kind: "tool_result"; // the agent asked the user: show it, then atypica_study_submit_tool_result
+      toolCallId: string;
+      toolType: "tool-requestInteraction" | "tool-makeStudyPlan";
+      input: unknown;
+    } // the question or the plan, as the agent wrote it
+  | {
+      kind: "artifact_ready"; // fetch with atypica_study_get_report / atypica_study_get_podcast
+      artifactType: "report" | "podcast";
+      token: string;
+    }
+  | { kind: "stalled"; error?: string } // the last run failed (error) or stopped; send a text message to start again
+  | { kind: "text_message" }; // the agent spoke and stopped; relay it, send the user's reply as text
+```
 
-### Type 1: User Text Message
+When the last run failed, `stalled` with `error` comes before `text_message`: a failed run often ends in half a sentence.
+
+#### steps
+
+What the study has done, one entry per step, in order.
+
+```ts
+type Step = {
+  kind:
+    | "social_observation"
+    | "personas"
+    | "interviews"
+    | "discussion"
+    | "audience_call"
+    | "desk_research"
+    | "report"
+    | "podcast";
+  state: State;
+  brief?: string; // what the agent asked the step to do, at most 200 characters
+  summary?: string; // what came out, at most 500 characters; once done
+  details?: object; // facts, by kind (below)
+  records?: {
+    // parts with their own record, each read by atypica_study_get_step
+    stepToken: string;
+    label?: string; // e.g. the persona interviewed
+    state: State;
+  }[];
+};
+
+type State = "running" | "done" | "failed" | "interrupted";
+```
+
+| `kind`               | `brief` | `summary`                | `details`                                         | `records`            |
+| -------------------- | ------- | ------------------------ | ------------------------------------------------- | -------------------- |
+| `social_observation` | yes     | `scoutSocialTrends` only | `platforms?`, `searches?` (searches per platform) | one: the observation |
+| `personas`           | no      | no                       | `personas: { personaId, name, tags }[]`, `error?` | none                 |
+| `interviews`         | yes     | yes                      | `error?`                                          | one per persona      |
+| `discussion`         | yes     | yes                      | `error?`                                          | one: the discussion  |
+| `audience_call`      | yes     | yes                      | none                                              | none                 |
+| `desk_research`      | yes     | yes                      | `sources?` (count)                                | none                 |
+| `report`             | no      | no                       | `token?`                                          | none                 |
+| `podcast`            | no      | no                       | `token?`                                          | none                 |
+
+States:
+
+- A step is `running` only when the study is running and the step is in the study's last message: a run writes only that message. A step left without output by an earlier run is `interrupted`.
+- A step whose tool returned its own failure is `failed`, not `done`: a discussion with fewer than two panel personas, personas built from a social observation that was not found, an interview group where no interview ran. Its records are `failed` too.
+- An interview record follows that interview's own result: `done` when it is in the tool output's list of interviews that ran, `failed` when it failed, was skipped (already interviewed) or was not in the panel. While the group is unfinished, an interview is already `done` once it has saved its conclusion and its last messages: a record that says `done` gets no more entries.
+
+### atypica_study_get_step
+
+Reads what happened inside one record of a step: what the interviewer and one persona said, what each persona said in a discussion, what a social observation searched and found. Works while the step runs.
 
 Input:
 
-```
+```ts
 {
-  userChatToken: string,
-  message: {
-    role: "user",             // Must be "user"
-    lastPart: {
-      type: "text",           // Must be "text"
-      text: string            // The user's message content
-    },
-    metadata?: {
-      shouldCorrectUserMessage?: boolean  // Treat as correction of previous message
-    }
-  },
-  attachments?: [{
-    objectUrl: string,
-    name: string,
-    mimeType: string,
-    size: number
-  }]
+  userChatToken: string
+  stepToken: string              // from steps[].records[] of this study
+  after?: integer                // skip the first this-many entries; pass the previous total
 }
 ```
 
-### Type 2: Tool Result Submission
+Output:
 
-Used to respond to a pending tool call (requestInteraction or makeStudyPlan) found in messages.
+```ts
+{
+  kind: string                   // the step's kind
+  state: State                   // the record's state
+  label?: string
+  total: number                  // entries so far
+  entries: Entry[]               // entries after `after`
+  summary?: string               // the interview's conclusion or the discussion's summary, once written
+}
+
+type Entry =
+  | { type: "say", speaker: string, text: string }
+  | { type: "action", action: string, input: unknown, result: string }  // a search the observer made; result cut to 600 characters
+```
+
+Speakers: `interviewer` and the persona's name in an interview; the moderator, the question's author and each persona's name in a discussion; `research brief` and `observer` in a social observation.
+
+A `stepToken` that is not in this study's own steps gives `isError: true` ("Step not found in this study"), whether or not it exists elsewhere.
+
+### atypica_study_list
+
+The caller's studies, most recently updated first.
 
 Input:
 
-```
+```ts
 {
-  userChatToken: string,
-  message: {
-    id: string,               // REQUIRED: original message ID containing the pending tool call
-    role: "assistant",        // REQUIRED: must be "assistant"
-    lastPart: {
-      type: "tool-requestInteraction" | "tool-makeStudyPlan",
-      toolCallId: string,     // The toolCallId from the pending tool part
-      state: "output-available",
-      input: { ... },         // Copy the original tool call's input verbatim
-      output: { ... }         // Your response (see shapes below)
-    }
+  page?: integer                 // default 1
+  pageSize?: integer             // default 20, at most 100
+}
+```
+
+Output:
+
+```ts
+{
+  data: {
+    studyId: number;
+    token: string; // the study's userChatToken
+    title: string;
+    topic: string;
+    hasReport: boolean;
+    hasPodcast: boolean;
+    replayUrl: string;
+    createdAt: string;
+    updatedAt: string;
+  }
+  [];
+  pagination: {
+    (page, pageSize, totalCount, totalPages);
   }
 }
 ```
 
-### Interaction Output Shapes
-
-For requestInteraction, single-question mode (pending input has a `question` field):
-
-```
-{ answer: string[] }
-// answer: selected option values. Always string[] even for single-choice (maxSelect: 1).
-// To skip all options: { skipped: true }
-```
-
-For requestInteraction, multi-question mode (pending input has a `questions` array):
-
-```
-{ answers: [{ label: string, answer: string[] }] }
-// One entry per question. label matches the question's label field exactly.
-```
-
-For makeStudyPlan:
-
-```
-{ confirmed: boolean }
-// confirmed: true to approve, false to reject and restart planning
-```
-
-### Output (both types)
-
-```
-{
-  messageId: string,
-  role: "user" | "assistant",
-  status: "running" | "saved_no_ai" | "ai_failed",
-  attachmentCount?: number,   // Present when attachments included
-  reason?: string,            // Present when status is "saved_no_ai" (e.g. "quota_exceeded")
-  error?: string              // Present when status is "ai_failed"
-}
-```
-
-Notes:
-
-- "running": message saved, AI execution started in background.
-- "saved_no_ai": message saved but quota exhausted, no AI execution.
-- "ai_failed": AI startup failed. Message is persisted. Retry by sending another message.
-- If client times out, use atypica_study_get_messages to check whether AI is still running.
-- The answer array values must match the option label strings exactly.
-- For single-choice (maxSelect: 1), still send answer as a one-element array.
-
----
-
-## atypica_study_get_messages
-
-Retrieve conversation history and execution status.
+### atypica_study_get_report
 
 Input:
 
-```
+```ts
 {
-  userChatToken: string,
-  tail?: number               // Limits to last N parts across all messages. Recommended: 3-5.
-}
+  token: string;
+} // the report token: next.token or a report step's details.token; not the userChatToken
 ```
 
 Output:
 
-```
+```ts
 {
-  isRunning: boolean,         // true = AI executing, poll again. false = can interact.
-  messages: [{
-    messageId: string,
-    role: "user" | "assistant",
-    parts: [
-      { type: "text", text: string }
-      | { type: "reasoning", text: string }
-      | {
-          type: string,       // e.g. "tool-requestInteraction", "tool-makeStudyPlan", "tool-generateReport"
-          state: "input-available" | "output-available" | "output-error",
-          toolCallId: string,
-          input: { ... },
-          output?: { ... },   // Present when state is "output-available"
-          errorText?: string  // Present when state is "output-error"
-        }
-    ],
-    createdAt: string         // ISO 8601
-  }]
-}
-```
-
-Notes:
-
-- Scan parts for state === "input-available" — these require user interaction (submit via send_message Type 2).
-- With tail, you get the last N parts (newest). Useful for quick state checks without full history.
-- Without tail, returns all messages. Can be large for long studies.
-- Polling strategy: before plan confirmation every 30s, after plan confirmation every 5 min.
-
----
-
-## atypica_study_list
-
-List historical research sessions.
-
-Input:
-
-```
-{
-  page?: number,              // Default: 1
-  pageSize?: number           // Default: 20, max: 100
-}
-```
-
-Output:
-
-```
-{
-  data: [{
-    studyId: number,
-    token: string,            // userChatToken to resume/query this study
-    title: string,            // Auto-generated title
-    topic: string,            // Research topic
-    hasReport: boolean,
-    hasPodcast: boolean,
-    replayUrl: string,        // https://atypica.ai/study/{token}/share?replay=1
-    createdAt: string,        // ISO 8601
-    updatedAt: string
-  }],
-  pagination: { page: number, pageSize: number, totalCount: number, totalPages: number }
-}
-```
-
-Notes:
-
-- Ordered by most recently updated first.
-- Use the token to call get_messages or send_message on existing studies.
-
----
-
-## atypica_study_get_report
-
-Retrieve a generated research report.
-
-Input:
-
-```
-{
-  token: string               // Report token from generateReport tool output in messages
-}
-```
-
-Output:
-
-```
-{
-  token: string,
-  instruction: string,        // The generation instruction used
-  title: string,
-  description: string,
-  content: string,            // Full report in HTML format
-  coverUrl?: string,          // Signed CDN URL, expires in 1 hour
-  shareUrl: string,           // Public: https://atypica.ai/artifacts/report/{token}/share
-  generatedAt: string,        // ISO 8601
-  createdAt: string,
+  token: string
+  instruction: string            // what the agent asked the report to cover
+  title?: string
+  description?: string
+  content: string                // the report as one self-contained HTML page
+  coverUrl?: string              // proxy CDN link, does not expire
+  shareUrl: string               // https://atypica.ai/artifacts/report/<token>/share, no sign-in
+  generatedAt: string
+  createdAt: string
   updatedAt: string
 }
 ```
 
-Notes:
-
-- The report token is found in message parts where type is "tool-generateReport" and state is "output-available", at output.reportToken.
-- coverUrl is signed and expires after 1 hour. Re-fetch if expired.
-- content is self-contained HTML.
-
----
-
-## atypica_study_get_podcast
-
-Retrieve a generated podcast.
+### atypica_study_get_podcast
 
 Input:
 
-```
+```ts
 {
-  token: string               // Podcast token from generatePodcast tool output in messages
-}
+  token: string;
+} // the podcast token: next.token or a podcast step's details.token
 ```
 
 Output:
 
-```
+```ts
 {
-  token: string,
-  instruction: string,        // The generation instruction used
-  script: string,             // Full podcast transcript
-  audioUrl?: string,          // Signed CDN URL for audio, expires in 1 hour
-  coverUrl?: string,          // Signed CDN URL for cover image, expires in 1 hour
-  metadata: {
-    title: string,
-    duration: number,         // Seconds
-    size: number,             // Bytes
-    mimeType: string,         // e.g. "audio/mpeg"
-    showNotes: string
-  },
-  shareUrl: string,           // Public: https://atypica.ai/artifacts/podcast/{token}/share
-  generatedAt: string,        // ISO 8601
-  createdAt: string,
+  token: string
+  instruction: string
+  script: string
+  audioUrl: string | null        // proxy CDN link, does not expire; null until the audio exists
+  coverUrl?: string              // proxy CDN link, does not expire
+  metadata?: {                   // as stored with the podcast
+    title?: string
+    duration?: number            // seconds
+    size?: number                // bytes
+    mimeType?: string
+    showNotes?: string
+    coverObjectUrl?: string
+  }
+  shareUrl: string               // https://atypica.ai/artifacts/podcast/<token>/share
+  generatedAt?: string
+  createdAt: string
   updatedAt: string
 }
 ```
 
-Notes:
+### atypica_panel_search
 
-- The podcast token is found in message parts where type is "tool-generatePodcast" and state is "output-available", at output.podcastToken.
-- audioUrl and coverUrl are signed and expire after 1 hour.
-
----
-
-## atypica_get_upload_credentials
-
-Get a presigned URL to upload a file. After uploading via HTTP PUT, use the objectUrl as attachment reference.
+The caller's persona panels. A panel is a saved group of AI-simulated consumers; pass its id to `atypica_study_create`.
 
 Input:
 
-```
+```ts
 {
-  fileName: string,           // With extension, e.g. "survey.pdf"
-  mimeType: string            // e.g. "image/png", "application/pdf", "text/csv"
+  query?: string                 // matches the title, case-insensitive; without it, all panels
+  page?: integer                 // default 1
+  pageSize?: integer             // default 20, at most 50
 }
 ```
 
 Output:
 
-```
+```ts
 {
-  putUrl: string,             // Presigned PUT URL. Expires in 5 minutes.
-  objectUrl: string,          // Permanent S3 URL to reference in attachments.
-  fileName: string,
-  mimeType: string
+  data: { panelId: number, title: string, personaCount: number, createdAt: string, updatedAt: string }[]
+  pagination: { page, pageSize, totalCount, totalPages }
 }
 ```
 
-Notes:
+### atypica_persona_search
 
-- Supported images: jpeg, png, gif, webp, bmp, svg.
-- Supported documents: pdf, json, csv.
-- Upload: HTTP PUT to putUrl with Content-Type header matching mimeType, file as body.
-- putUrl is single-use and expires after 5 minutes.
-- Limits per message: max 5 images, max 3 documents, max 3MB per file, max 50MB total.
-
----
-
-## atypica_panel_search
-
-Search persona panels. Each panel is a curated group of AI personas used as research subject pool.
+AI-simulated consumers visible to the caller: public ones and the caller's own.
 
 Input:
 
-```
+```ts
 {
-  query?: string,             // Filter by title, case-insensitive. Without query, returns all.
-  page?: number,              // Default: 1
-  pageSize?: number           // Default: 20, max: 50
+  locales: ("zh-CN" | "en-US")[] // required, at least one: the personas' language
+  query?: string                 // name or source; without it, the newest
+  privateOnly?: boolean          // only the caller's own
+  limit?: integer                // default 10, at most 50
 }
 ```
 
 Output:
 
-```
+```ts
 {
-  data: [{
-    panelId: number,
-    title: string,
-    personaCount: number,
-    createdAt: string,        // ISO 8601
-    updatedAt: string
-  }],
-  pagination: { page: number, pageSize: number, totalCount: number, totalPages: number }
+  data: { personaId: number, token: string, name: string, source: string, tier: number, tags: string[], createdAt: string }[]
 }
 ```
 
-Notes:
-
-- Pass panelId to atypica_study_create to use that panel as the persona source.
-- Without query, all accessible panels are returned.
-
----
-
-## atypica_persona_search
-
-Search AI personas using text matching.
+### atypica_persona_get
 
 Input:
 
-```
+```ts
 {
-  query?: string,             // Text search over name/source fields
-  privateOnly?: boolean,      // true = only caller's own private personas. Default: false.
-  limit?: number              // Default: 10, max: 50
+  personaId: number;
 }
 ```
 
 Output:
 
-```
-{
-  data: [{
-    personaId: number,
-    token: string,
-    name: string,
-    source: string,           // Origin/background description
-    tier: number,             // Access tier 0-3
-    tags: string[],
-    createdAt: string         // ISO 8601
-  }]
-}
-```
-
-Notes:
-
-- With query: uses indexed text search.
-- Without query: returns the latest visible personas (public + caller's private).
-- privateOnly: true restricts to only the caller's own personas.
-
----
-
-## atypica_persona_get
-
-Get full details of a persona including its complete prompt.
-
-Input:
-
-```
+```ts
 {
   personaId: number
+  token: string
+  name: string
+  source: string
+  prompt: string                 // the persona's full prompt
+  tier: number
+  tags: string[]
+  locale: string
+  createdAt: string
+  updatedAt: string
+}
+```
+
+### atypica_get_upload_credentials
+
+A URL to upload one file to. PUT the file to `putUrl` with the same `Content-Type` within 5 minutes, then pass `objectUrl` as a study attachment.
+
+Input:
+
+```ts
+{
+  fileName: string; // with extension
+  mimeType: string; // images: jpeg, png, gif, webp, bmp, svg+xml; documents: pdf, doc, docx, xls, xlsx, ppt, pptx, txt, md, json, csv
 }
 ```
 
 Output:
 
-```
+```ts
 {
-  personaId: number,
-  token: string,
-  name: string,
-  source: string,
-  prompt: string,             // Full persona system prompt text
-  tier: number,               // 0-3
-  tags: string[],
-  locale: string,             // e.g. "en-US", "zh-CN"
-  createdAt: string,          // ISO 8601
-  updatedAt: string
+  putUrl: string; // presigned PUT, valid 5 minutes
+  objectUrl: string; // the file's address, without signature
+  fileName: string;
+  mimeType: string;
 }
 ```
 
-Notes:
-
-- The prompt field contains the full text used as the AI persona's system prompt.
-- Persona details don't change often — safe to cache locally.
-
----
-
-## Error Handling
-
-All errors follow JSON-RPC 2.0 format: `{ error: { code: number, message: string } }`
-
-- **-32001 Unauthorized**: Invalid, expired, or missing API key. Verify format (`atypica_xxx`) and Bearer scheme.
-- **-32602 Invalid params**: Field type mismatch or constraint violation.
-- **-32603 Internal error**: Server-side failure. Safe to retry after brief delay.
-- **-32000 Business error**: Study not found, unauthorized access.
-- **Quota exceeded**: Not a JSON-RPC error. sendMessage returns status "saved_no_ai" with reason "quota_exceeded".
-- **AI failed**: sendMessage returns status "ai_failed" with error message. Message is persisted, retry by sending another.
-- **Timeout**: If sendMessage times out, poll getMessages — AI may still be running.
-- **Retry guidance**: All read operations are idempotent and safe to retry.
-
----
-
-## Security and Limitations
-
-- API keys are user-scoped only. Team keys return 403.
-- All operations verify resource ownership.
-- CDN URLs (cover, audio) are signed and expire after 1 hour.
-- Upload presigned URLs expire after 5 minutes, single-use.
-- Max 5 images, 3 documents per message. Max 3MB per file. Max 50MB total per message.
-- Max 100 messages returned per get_messages request.
-- Persona search returns public personas plus caller's own private personas.
-- Not available via MCP: referencing historical studies in new ones, custom team prompts, real-time push notifications.
-- Data isolation: per-user account. Studies and personas not shared between users. AI responses saved to user's account only.
+Another type gives `isError: true`.

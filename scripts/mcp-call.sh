@@ -10,7 +10,7 @@
 #   mcp-call.sh atypica_study_get_messages '{"userChatToken":"abc123","tail":10}'
 #
 # Environment:
-#   ATYPICA_TOKEN    - API token from https://atypica.ai/account/settings
+#   ATYPICA_TOKEN    - API token from https://atypica.ai/account/api-keys
 #   ATYPICA_ENDPOINT - API endpoint (default: https://atypica.ai/mcp/study)
 #
 # Options:
@@ -55,7 +55,7 @@ Options:
   -h, --help               Show this help message
 
 Environment Variables:
-  ATYPICA_TOKEN     API token from https://atypica.ai/account/settings
+  ATYPICA_TOKEN     API token from https://atypica.ai/account/api-keys
   ATYPICA_ENDPOINT  API endpoint (default: https://atypica.ai/mcp/study)
 
 Examples:
@@ -78,10 +78,12 @@ Examples:
   mcp-call.sh atypica_study_get_messages '{"userChatToken":"abc"}' -f result.json
 
 Available Tools:
-  atypica_study_create           - Create research session
-  atypica_study_send_message     - Send message and start study execution
-  atypica_study_get_messages     - Get conversation history
-  atypica_study_list             - List historical sessions
+  atypica_study_create             - Create a study; the research agent starts at once
+  atypica_study_send_text_message  - Send the user's text and run the agent
+  atypica_study_submit_tool_result - Answer the agent's question or plan
+  atypica_study_get_messages       - What to do next, the steps so far, the messages
+  atypica_study_get_step           - What was said inside one interview or discussion
+  atypica_study_list               - List earlier studies
   atypica_study_get_report       - Get research report
   atypica_study_get_podcast      - Get podcast content
   atypica_get_upload_credentials - Get presigned upload URL
