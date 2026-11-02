@@ -6,7 +6,7 @@ Every tool of the MCP server at `https://atypica.ai/mcp/study`, with its input a
 
 **Transport and sign-in.** Streamable HTTP, JSON-RPC 2.0, at `https://atypica.ai/mcp/study`. Send `Authorization: Bearer atypica_…`, an API key from https://atypica.ai/account/api-keys. It acts as the account the user signed in as (a personal account or a team member) and spends that account's credits. A missing or invalid key is HTTP 401.
 
-**Results.** Every tool returns `content` (one text block, for clients that read only text) and, on success, `structuredContent` (the JSON below). The two say the same thing. A failure is a normal result with `isError: true` and one sentence in the text, not a JSON-RPC error:
+**Results.** Every tool returns `content` (one text block, for clients that read only text) and, on success, `structuredContent` (the JSON below). Both are made from the tool's declared `outputSchema`, which `tools/list` returns; no field outside it is sent. A failure is a normal result with `isError: true` and one sentence in the text, not a JSON-RPC error:
 
 - one the client can act on (not found, still running, a wrong answer shape) says what to do;
 - an unexpected one says only that something went wrong on atypica's side; the cause stays in the server log.
@@ -119,9 +119,9 @@ Input:
   output: unknown                // the user's answer, shaped by next.toolType:
 }
 
-// tool-requestInteraction, one question (input has `question`):
+// tool-requestInteraction, one question (next.questions has one):
 { answer: string[] }             // option texts copied exactly; an array even for one choice
-// tool-requestInteraction, several questions (input has `questions`):
+// tool-requestInteraction, several questions (next.questions has more than one):
 { answers: { label: string, answer: string[] }[] }
 // tool-requestInteraction, the user declined:
 { skipped: true }
@@ -186,11 +186,17 @@ What the client does now, decided by the server. One kind at a time, checked in 
 type Next =
   | { kind: "running" } // poll again in 1–2 minutes
   | {
-      kind: "tool_result"; // the agent asked the user: show it, then atypica_study_submit_tool_result
+      kind: "tool_result"; // the agent asked the user to choose: show the questions, then atypica_study_submit_tool_result
       toolCallId: string;
-      toolType: "tool-requestInteraction" | "tool-makeStudyPlan";
-      input: unknown;
-    } // the question or the plan, as the agent wrote it
+      toolType: "tool-requestInteraction";
+      questions: { label?: string; question: string; options: string[]; maxSelect?: number }[]; // maxSelect: how many the user may choose; absent: any number
+    }
+  | {
+      kind: "tool_result"; // the agent asked the user to confirm a plan: show it, then atypica_study_submit_tool_result
+      toolCallId: string;
+      toolType: "tool-makeStudyPlan";
+      plan: string; // markdown
+    }
   | {
       kind: "artifact_ready"; // fetch with atypica_study_get_report / atypica_study_get_podcast
       artifactType: "report" | "podcast";
@@ -277,7 +283,7 @@ Output:
 
 type Entry =
   | { type: "say", speaker: string, text: string }
-  | { type: "action", action: string, input: unknown, result: string }  // a search the observer made; result cut to 600 characters
+  | { type: "action", action: string, query?: string, result: string }  // a tool the observer or interviewer called: query is what it searched for; result cut to 600 characters
 ```
 
 Speakers: `interviewer` and the persona's name in an interview; the moderator, the question's author and each persona's name in a discussion; `research brief` and `observer` in a social observation.
@@ -334,7 +340,6 @@ Output:
 ```ts
 {
   token: string
-  instruction: string            // what the agent asked the report to cover
   title?: string
   description?: string
   content: string                // the report as one self-contained HTML page
@@ -361,7 +366,6 @@ Output:
 ```ts
 {
   token: string
-  instruction: string
   script: string
   audioUrl: string | null        // proxy CDN link, does not expire; null until the audio exists
   coverUrl?: string              // proxy CDN link, does not expire
@@ -417,7 +421,7 @@ Output:
 
 ```ts
 {
-  data: { personaId: number, token: string, name: string, source: string, tier: number, tags: string[], createdAt: string }[]
+  data: { personaId: number, token: string, name: string, source: string, tags: string[], createdAt: string }[]
 }
 ```
 
@@ -439,10 +443,9 @@ Output:
   token: string
   name: string
   source: string
-  prompt: string                 // the persona's full prompt
-  tier: number
+  prompt: string                 // the persona's profile: who it is and how it speaks
   tags: string[]
-  locale: string
+  locale: string | null
   createdAt: string
   updatedAt: string
 }
