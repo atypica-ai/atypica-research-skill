@@ -72,14 +72,16 @@ Going deeper: when the user asks what was actually said, read the record with `a
 
 ## When the agent asks
 
-The agent stops twice for the user: to clarify the question (`tool-requestInteraction`) and to confirm its plan (`tool-makeStudyPlan`). The answer is always the user's: show the question, wait, submit what the user chose. Never answer, pick an option or confirm a plan for the user, and never take silence as a yes.
+The agent stops twice for the user: to clarify the question (`tool-requestInteraction`) and to confirm its plan (`tool-makeStudyPlan`). By default, show the question or plan, wait, and submit what the user chose. Do not pick options or confirm a plan without the user's answer or explicit delegation of that decision. Never take silence as a yes.
+
+Explicit delegation such as "confirm whatever plan the agent proposes without asking me" permits `atypica_study_submit_tool_result` with `{ "confirmed": true }` when the agent proposes a plan for that study. Report that you confirmed under the user's delegation. This permission covers plan confirmation, not unanswered clarification questions; ask those unless the user also delegated choosing their answers. Without delegation, show the actual plan and wait for approval.
 
 | `next.toolType`           | Show                                                                | Submit as `output`                                                                                                     |
 | ------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `tool-requestInteraction` | Each question with its options, as choices the user can pick        | `{ "answer": ["<option>"] }`; several questions `{ "answers": [{ "label", "answer": [...] }] }`; `{ "skipped": true }` |
 | `tool-makeStudyPlan`      | The plan in a few lines: what is studied, with whom, what comes out | `{ "confirmed": true }`, or `{ "confirmed": false }` and send the user's changes as a text message                     |
 
-`atypica_study_submit_tool_result({ userChatToken, toolCallId: next.toolCallId, output })`. Option text is copied exactly; `answer` is always an array. An answer in the wrong shape is rejected and not saved.
+`atypica_study_submit_tool_result({ userChatToken, toolCallId: next.toolCallId, output })`. Use the client's own way of offering choices when it has one, with no option preselected; if it requires a default selection, number the options instead and let the user reply. Do not choose exploratory defaults or describe an option as selected before the user chooses it. Option text is copied exactly; `answer` is always an array. An answer in the wrong shape is rejected and not saved.
 
 ## Delivering
 
