@@ -240,7 +240,7 @@ type State = "running" | "done" | "failed" | "interrupted";
 
 | `kind`               | `brief` | `summary`                | `details`                                         | `records`            |
 | -------------------- | ------- | ------------------------ | ------------------------------------------------- | -------------------- |
-| `social_observation` | yes     | `scoutSocialTrends` only | `platforms?`, `searches?` (searches per platform) | one: the observation |
+| `social_observation` | yes     | yes, once done           | `platforms?`, `searches?` (searches per platform) | one: the observation |
 | `personas`           | no      | no                       | `personas: { personaId, name, tags }[]`           | none                 |
 | `interviews`         | yes     | yes                      | none                                              | one per persona      |
 | `discussion`         | yes     | yes                      | none                                              | one: the discussion  |
