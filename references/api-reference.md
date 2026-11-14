@@ -421,7 +421,7 @@ Output:
 
 ```ts
 {
-  data: { personaId: number, token: string, name: string, source: string, tags: string[], createdAt: string }[]
+  data: { personaId: number, name: string, source: string, tags: string[], createdAt: string }[]
 }
 ```
 
@@ -440,7 +440,6 @@ Output:
 ```ts
 {
   personaId: number
-  token: string
   name: string
   source: string
   prompt: string                 // the persona's profile: who it is and how it speaks
