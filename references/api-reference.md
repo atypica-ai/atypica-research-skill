@@ -148,10 +148,12 @@ Output:
 
 ```ts
 {
+  title: string                  // the study's title
   isRunning: boolean
   next: Next
   steps: Step[]
   replayUrl: string              // https://atypica.ai/study/<token>/share?replay=1
+  artifactUrl?: string           // with next.kind artifact_ready: the report's or podcast's page
   conversation: Entry[]
 }
 
@@ -174,9 +176,9 @@ type Entry =
     }
 ```
 
-`replayUrl` opens without sign-in and shows the study as it was when opened; reloading brings it up to date.
+`replayUrl` opens without sign-in and shows the study as it was when opened; reloading brings it up to date. `artifactUrl`, when the study's report or podcast is ready, opens that page without sign-in.
 
-The text content holds `next`, `replayUrl`, the steps and the last 3000 characters of the conversation.
+The text content holds `next`, `replayUrl`, `artifactUrl`, the steps and the last 3000 characters of the conversation.
 
 #### next
 
