@@ -86,6 +86,8 @@ What `atypica_study_create`, `atypica_study_send_text_message` and `atypica_stud
 | Too many or unsupported attachments              | yes       | none; nothing was saved                                                                                                                                                            |
 | The study does not exist or is not the caller's  | yes       | none                                                                                                                                                                               |
 
+Every saved write also returns `token`, the study's userChatToken.
+
 `attachmentCount` is present on `atypica_study_send_text_message`.
 
 ### atypica_study_send_text_message
